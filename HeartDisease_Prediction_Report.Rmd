@@ -1,0 +1,83 @@
+---
+title: "Heart Disease Prediction Project"
+author: "Mr. AYUSH KUMAR"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r, echo=TRUE, message=FALSE, warning=FALSE}
+# Load libraries
+library(tidyverse)
+library(caret)
+library(randomForest)
+library(corrplot)
+library(xgboost)
+
+# Load dataset (choose heart.csv file when prompted)
+data <- read_csv(file.choose())
+
+# View structure
+glimpse(data)
+
+# Convert necessary columns to factors
+data <- data %>%
+  mutate(across(c(Sex, ChestPainType, RestingECG, ExerciseAngina, ST_Slope), as.factor)) %>%
+  mutate(HeartDisease = factor(HeartDisease, levels=c(0,1), labels=c("No", "Yes")))
+
+# Check target class distribution
+table(data$HeartDisease)
+
+# Correlation plot for numerical features
+corr_data <- data %>% select(Age, RestingBP, Cholesterol, MaxHR, Oldpeak)
+corrplot(cor(corr_data), method="number")
+
+# Train-test split (80-20)
+set.seed(123)
+trainIndex <- createDataPartition(data$HeartDisease, p=0.8, list=FALSE)
+trainData <- data[trainIndex, ]
+testData <- data[-trainIndex, ]
+
+# Random Forest model
+set.seed(123)
+rf_model <- randomForest(HeartDisease ~ Age + RestingBP + Cholesterol + MaxHR + Oldpeak,
+                         data=trainData, ntree=500, importance=TRUE)
+print(rf_model)
+varImpPlot(rf_model)
+
+# RF predictions and confusion matrix
+rf_predictions <- predict(rf_model, newdata=testData)
+confusionMatrix(rf_predictions, testData$HeartDisease)
+
+# Prepare matrices for XGBoost
+train_features <- trainData %>% select(Age, RestingBP, Cholesterol, MaxHR, Oldpeak) %>% as.matrix()
+train_labels <- ifelse(trainData$HeartDisease == "Yes", 1, 0)
+test_features  <- testData %>% select(Age, RestingBP, Cholesterol, MaxHR, Oldpeak) %>% as.matrix()
+test_labels <- ifelse(testData$HeartDisease == "Yes", 1, 0)
+
+# XGBoost model
+set.seed(123)
+xgb_model <- xgboost(data = train_features,
+                     label = train_labels,
+                     nrounds = 100,
+                     objective = "binary:logistic",
+                     eval_metric = "error",
+                     verbose = 0)
+
+# XGBoost predictions and confusion matrix
+xgb_pred_prob <- predict(xgb_model, newdata=test_features)
+xgb_predictions <- ifelse(xgb_pred_prob > 0.5, 1, 0)
+xgb_predictions_factor <- factor(ifelse(xgb_predictions == 1, "Yes", "No"), levels=c("Yes", "No"))
+test_labels_factor <- factor(ifelse(test_labels == 1, "Yes", "No"), levels=c("Yes", "No"))
+confusionMatrix(xgb_predictions_factor, test_labels_factor)
+
+# Visualizations — Age distribution by HeartDisease
+ggplot(data, aes(x=Age, fill=HeartDisease)) +
+  geom_histogram(binwidth=5, color="black", alpha=0.7, position="identity") +
+  scale_fill_manual(values=c("steelblue", "tomato")) +
+  labs(title="Age Distribution by Heart Disease", x="Age", y="Count")
+
+# Visualizations — MaxHR density by HeartDisease
+ggplot(data, aes(x=MaxHR, fill=HeartDisease)) +
+  geom_density(alpha=0.5) +
+  scale_fill_manual(values=c("steelblue", "tomato")) +
+  labs(title="Max Heart Rate Distribution by Heart Disease", x="MaxHR", y="Density")
